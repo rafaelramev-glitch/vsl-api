@@ -4,20 +4,20 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
-const AWS = require("aws-sdk");
+const S3 = require("aws-sdk/clients/s3");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "vsl_secret_default";
 
-// Configuração otimizada para Cloudflare R2
-const s3 = new AWS.S3({
+// Configuração DEFINITIVA com a região ENAM que vimos no seu print
+const s3 = new S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
   secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   signatureVersion: "v4",
-  region: "eeur", // Região padrão para R2 evitar erro de NoSuchBucket
+  region: "enam", 
 } );
 
 app.use(cors());
