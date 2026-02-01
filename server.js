@@ -4,20 +4,20 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
-const { S3 } = require("aws-sdk");
+const AWS = require("aws-sdk");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 const JWT_SECRET = process.env.JWT_SECRET || "vsl_secret_default";
 
-// Configuração do S3/R2 com log de erro
-const s3 = new S3({
+// Configuração otimizada para Cloudflare R2
+const s3 = new AWS.S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
   secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   signatureVersion: "v4",
-  region: "auto",
+  region: "eeur", // Região padrão para R2 evitar erro de NoSuchBucket
 } );
 
 app.use(cors());
@@ -37,10 +37,9 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Aumentar o limite de tamanho para o Multer
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 } // Limite de 50MB para teste
+  limits: { fileSize: 100 * 1024 * 1024 } 
 });
 
 app.get("/", (req, res) => res.send("API VSL Online"));
@@ -56,14 +55,12 @@ app.post("/api/auth/login", (req, res) => {
 });
 
 app.post("/api/videos/upload", authenticateToken, upload.single("video"), async (req, res) => {
-  console.log("Recebendo solicitação de upload...");
-  if (!req.file) return res.status(400).send("Nenhum arquivo de vídeo recebido.");
+  if (!req.file) return res.status(400).send("Nenhum arquivo recebido.");
 
   const videoId = uuidv4();
   const videoKey = `${videoId}.mp4`;
 
   try {
-    console.log(`Tentando enviar para o bucket: ${process.env.R2_BUCKET_NAME}`);
     await s3.putObject({
       Bucket: process.env.R2_BUCKET_NAME,
       Key: videoKey,
@@ -77,11 +74,10 @@ app.post("/api/videos/upload", authenticateToken, upload.single("video"), async 
     const videoData = { id: videoId, title: req.file.originalname, url: videoUrl, embedCode };
     videos.push(videoData);
     
-    console.log("Upload concluído com sucesso!");
     res.status(201).json(videoData);
   } catch (error) {
-    console.error("ERRO DETALHADO NO UPLOAD:", error);
-    res.status(500).send(`Erro no servidor: ${error.message}`);
+    console.error("ERRO NO UPLOAD:", error);
+    res.status(500).send(`Erro: ${error.message}`);
   }
 });
 
