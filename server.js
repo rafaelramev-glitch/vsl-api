@@ -8,9 +8,10 @@ const { S3 } = require("aws-sdk");
 const { v4: uuidv4 } = require("uuid");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET;
+const PORT = process.env.PORT || 10000;
+const JWT_SECRET = process.env.JWT_SECRET || "vsl_secret_default";
 
+// Configuração do S3/R2 com log de erro
 const s3 = new S3({
   endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   accessKeyId: process.env.R2_ACCESS_KEY_ID,
@@ -28,15 +29,21 @@ const videos = [];
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
-  if (token == null) return res.sendStatus(401);
+  if (!token) return res.status(401).send("Token não fornecido");
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.sendStatus(403);
+    if (err) return res.status(403).send("Token inválido");
     req.user = user;
     next();
   });
 };
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Aumentar o limite de tamanho para o Multer
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // Limite de 50MB para teste
+});
+
+app.get("/", (req, res) => res.send("API VSL Online"));
 
 app.post("/api/auth/login", (req, res) => {
   const { username, password } = req.body;
@@ -44,27 +51,37 @@ app.post("/api/auth/login", (req, res) => {
   if (!user || !bcrypt.compareSync(password, user.password)) {
     return res.status(400).send("Credenciais inválidas");
   }
-  const accessToken = jwt.sign({ username: user.username }, JWT_SECRET, { expiresIn: "1h" });
+  const accessToken = jwt.sign({ username: user.username }, JWT_SECRET, { expiresIn: "24h" });
   res.json({ accessToken });
 });
 
 app.post("/api/videos/upload", authenticateToken, upload.single("video"), async (req, res) => {
-  if (!req.file) return res.status(400).send("Nenhum arquivo enviado.");
+  console.log("Recebendo solicitação de upload...");
+  if (!req.file) return res.status(400).send("Nenhum arquivo de vídeo recebido.");
+
   const videoId = uuidv4();
   const videoKey = `${videoId}.mp4`;
+
   try {
+    console.log(`Tentando enviar para o bucket: ${process.env.R2_BUCKET_NAME}`);
     await s3.putObject({
       Bucket: process.env.R2_BUCKET_NAME,
       Key: videoKey,
       Body: req.file.buffer,
       ContentType: req.file.mimetype,
     }).promise();
+
     const videoUrl = `${process.env.R2_PUBLIC_URL}/${videoKey}`;
     const embedCode = `<iframe src="${videoUrl}" width="640" height="360" frameborder="0" allowfullscreen></iframe>`;
-    videos.push({ id: videoId, title: req.file.originalname, url: videoUrl, embedCode });
-    res.status(201).json({ videoId, videoUrl, embedCode });
+    
+    const videoData = { id: videoId, title: req.file.originalname, url: videoUrl, embedCode };
+    videos.push(videoData);
+    
+    console.log("Upload concluído com sucesso!");
+    res.status(201).json(videoData);
   } catch (error) {
-    res.status(500).send("Falha no upload");
+    console.error("ERRO DETALHADO NO UPLOAD:", error);
+    res.status(500).send(`Erro no servidor: ${error.message}`);
   }
 });
 
